@@ -8,7 +8,14 @@ import { Toaster } from 'sonner';
 import { wagmiConfig } from '@/lib/wagmi';
 import '@rainbow-me/rainbowkit/styles.css';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
@@ -16,7 +23,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
           {children}
-          <Toaster position="bottom-right" />
+          <Toaster position="bottom-right" richColors closeButton />
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

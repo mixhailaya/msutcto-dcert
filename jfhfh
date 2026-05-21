@@ -1,0 +1,283 @@
+'use client';
+
+import { useReadContract, useWriteContract, useAccount } from 'wagmi';
+import { useReadContracts } from 'wagmi';
+import { CERTIFICATE_CONTRACT_ABI, CONTRACT_ADDRESS } from '@/lib/contract-abi';
+
+// Type for certificate data matching your contract
+export interface Certificate {
+  certificateId: string;
+  recipientAddress: `0x${string}`;
+  recipientName: string;
+  courseName: string;
+  completionDate: bigint;
+  isRevoked: boolean;
+  issuedAt: bigint;
+}
+
+// Type for formatted certificate used in UI
+export interface FormattedCertificate {
+  validTill: string;
+  id: string;
+  recipient: string;
+  recipientAddress: string;
+  course: string;
+  issueDate: string;
+  completionDate: string;
+  status: 'valid' | 'revoked';
+}
+
+/**
+ * Helper function to safely format blockchain timestamp
+ */
+function formatBlockchainDate(timestamp: bigint | undefined | null): string {
+  if (!timestamp) return 'N/A';
+  
+  try {
+    const milliseconds = Number(timestamp) * 1000;
+    
+    if (isNaN(milliseconds) || milliseconds <= 0) {
+      return 'N/A';
+    }
+    
+    const date = new Date(milliseconds);
+    
+    if (isNaN(date.getTime())) {
+      return 'N/A';
+    }
+    
+    return date.toISOString().split('T')[0];
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'N/A';
+  }
+}
+
+/**
+ * Hook to get all certificates using batch fetching
+ */
+export function useGetAllCertificatesBatch() {
+  const { address } = useAccount();
+
+  // First, get all certificate IDs
+  const { data: certificateIds, isLoading: isLoadingIds, error: idsError, refetch: refetchIds } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CERTIFICATE_CONTRACT_ABI,
+    functionName: 'getAllCertificateIds',
+    args: [],
+    query: {
+      enabled: !!address,
+    },
+  });
+
+  // Prepare contract calls for each certificate
+  const contracts = (certificateIds as string[] || []).map((certId) => ({
+    address: CONTRACT_ADDRESS,
+    abi: CERTIFICATE_CONTRACT_ABI,
+    functionName: 'getCertificate',
+    args: [certId],
+  }));
+
+  // Fetch all certificates in a single batch call
+  const { data: certificatesData, isLoading: isLoadingCerts, error: certsError, refetch: refetchCerts } = useReadContracts({
+    contracts,
+    query: {
+      enabled: !!certificateIds && Array.isArray(certificateIds) && certificateIds.length > 0,
+    },
+  });
+
+  // Format the certificates
+  const formattedCertificates: FormattedCertificate[] = certificatesData
+    ?.filter((result) => result.status === 'success' && result.result)
+    .map((result) => {
+      const cert = result.result as unknown as Certificate;
+      return {
+        validTill: formatBlockchainDate(cert.completionDate),
+        id: cert.certificateId,
+        recipient: cert.recipientName,
+        recipientAddress: cert.recipientAddress,
+        course: cert.courseName,
+        issueDate: formatBlockchainDate(cert.issuedAt),
+        completionDate: formatBlockchainDate(cert.completionDate),
+        status: cert.isRevoked ? 'revoked' as const : 'valid' as const,
+      };
+    }) || [];
+
+  return {
+    data: formattedCertificates,
+    isLoading: isLoadingIds || isLoadingCerts,
+    error: idsError || certsError,
+    refetch: () => {
+      refetchIds();
+      refetchCerts();
+    },
+  };
+}
+
+/**
+ * Hook to get a single certificate by ID
+ */
+export function useGetCertificateById(certificateId: string) {
+  const { data, isLoading, error, refetch } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CERTIFICATE_CONTRACT_ABI,
+    functionName: 'getCertificate',
+    args: [certificateId],
+    query: {
+      enabled: !!certificateId,
+    },
+  });
+
+  const certificate = data as Certificate | undefined;
+
+  const formattedCertificate = certificate ? {
+    id: certificate.certificateId,
+    recipient: certificate.recipientName,
+    recipientAddress: certificate.recipientAddress,
+    course: certificate.courseName,
+    issueDate: formatBlockchainDate(certificate.issuedAt),
+    completionDate: formatBlockchainDate(certificate.completionDate),
+    status: certificate.isRevoked ? 'revoked' as const : 'valid' as const,
+  } : null;
+
+  return {
+    certificate: formattedCertificate,
+    rawCertificate: certificate,
+    isLoading,
+    error,
+    refetch,
+  };
+}
+
+/**
+ * Hook to verify a certificate on-chain
+ */
+export function useVerifyCertificate(certificateId: string) {
+  const { data, isLoading, isError, error } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CERTIFICATE_CONTRACT_ABI,
+    functionName: 'verifyCertificate',
+    args: [certificateId],
+    query: {
+      enabled: !!certificateId && certificateId.trim().length > 0,
+    },
+  });
+
+  return {
+    isValid: data as boolean | undefined,
+    isLoading,
+    isError,
+    error,
+  };
+}
+
+/**
+ * Hook to issue a single certificate (admin only)
+ */
+export function useIssueCertificate() {
+  const { writeContract, isPending, isSuccess, isError, error } =
+    useWriteContract();
+
+  const issueCertificate = (
+    certificateId: string,
+    recipientAddress: `0x${string}`,
+    recipientName: string,
+    courseName: string,
+    completionDate: bigint
+  ) => {
+    writeContract({
+      address: CONTRACT_ADDRESS,
+      abi: CERTIFICATE_CONTRACT_ABI,
+      functionName: 'issueCertificate',
+      args: [certificateId, recipientAddress, recipientName, courseName, completionDate],
+    });
+  };
+
+  return {
+    issueCertificate,
+    isPending,
+    isSuccess,
+    isError,
+    error,
+  };
+}
+
+interface BatchCertificate {
+  certificateId: string;
+  recipientAddress: `0x${string}`;
+  recipientName: string;
+  courseName: string;
+  completionDate: bigint;
+}
+
+/**
+ * Hook to batch issue certificates (admin only)
+ */
+export function useBatchIssueCertificates() {
+  const { writeContract, isPending, isSuccess, isError, error } =
+    useWriteContract();
+
+  const batchIssueCertificates = (certificates: BatchCertificate[]) => {
+    writeContract({
+      address: CONTRACT_ADDRESS,
+      abi: CERTIFICATE_CONTRACT_ABI,
+      functionName: 'issueCertificateBatch',
+      args: [certificates],
+    });
+  };
+
+  return {
+    batchIssueCertificates,
+    isPending,
+    isSuccess,
+    isError,
+    error,
+  };
+}
+
+/**
+ * Hook to revoke a certificate (admin only)
+ */
+export function useRevokeCertificate() {
+  const { writeContract, isPending, isSuccess, isError, error } =
+    useWriteContract();
+
+  const revokeCertificate = (certificateId: string) => {
+    writeContract({
+      address: CONTRACT_ADDRESS,
+      abi: CERTIFICATE_CONTRACT_ABI,
+      functionName: 'revokeCertificate',
+      args: [certificateId],
+    });
+  };
+
+  return {
+    revokeCertificate,
+    isPending,
+    isSuccess,
+    isError,
+    error,
+  };
+}
+
+/**
+ * Hook to check if the connected wallet is an authorized issuer
+ */
+export function useIsAuthorizedAdmin() {
+  const { address } = useAccount();
+
+  const { data: isAuthorized, isLoading } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: CERTIFICATE_CONTRACT_ABI,
+    functionName: 'isAuthorizedIssuer',
+    args: [address || '0x0000000000000000000000000000000000000000'],
+    query: {
+      enabled: !!address,
+    },
+  });
+
+  return {
+    isAuthorized: isAuthorized as boolean | undefined,
+    isLoading,
+  };
+}

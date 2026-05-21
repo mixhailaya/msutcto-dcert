@@ -1,0 +1,7 @@
+forge verify-contract \
+  --chain-id 11155111 \
+  --num-of-optimizations 200 \
+  --compiler-version v0.8.20 \
+  0x5D0753292F9D2fc3B296949AaB1cc664C5cc2e23 \
+  src/MSUTCTOCertificate.sol:MSUTCTOCertificate \
+  9VCT3GH9GKITVMA8ZGEKJF5NBCTT55P3XH
